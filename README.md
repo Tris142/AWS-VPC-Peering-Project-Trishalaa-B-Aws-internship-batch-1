@@ -43,7 +43,7 @@ A Bastion Host is deployed in the public subnet to securely access private EC2 i
 
 ### Architecture Diagram
 
-Add your project architecture diagram here:
+The project architecture diagram was added here:
 
 `architecture/vpc-peering-architecture.png`
 
