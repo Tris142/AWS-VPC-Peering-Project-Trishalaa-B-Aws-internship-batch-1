@@ -25,6 +25,47 @@ A Bastion Host is deployed in the public subnet to securely access private EC2 i
 
 ### Network Architecture
 
+```text
+                  Windows Laptop
+                       |
+                    PuTTY
+                       |
+                 Public IPv4
+                       |
+                Internet Gateway
+                       |
+        +-----------------------------+
+        |           VPC A             |
+        |       10.10.0.0/16          |
+        |                             |
+        |  Public Subnet               |
+        |  10.10.1.0/24               |
+        |                             |
+        |  Bastion Host                |
+        |  10.10.1.10                 |
+        |          |                  |
+        |          |                  |
+        |  Private Subnet              |
+        |  10.10.2.0/24               |
+        |                             |
+        |  App-A                      |
+        |  10.10.2.10                 |
+        +-------------+---------------+
+                      |
+                 VPC Peering
+                      |
+        +-------------+---------------+
+        |           VPC B             |
+        |       10.20.0.0/16          |
+        |                             |
+        |  Private Subnet              |
+        |  10.20.1.0/24               |
+        |                             |
+        |  App-B                      |
+        |  10.20.1.10                 |
+        +-----------------------------+
+```
+
 **VPC A**
 - Public Subnet – Bastion Host EC2
 - Private Subnet – Application EC2
@@ -87,233 +128,299 @@ The project architecture diagram was added here:
 
 **Note:** Only the Bastion Host receives a public IPv4 address. Both application servers use private IP addresses.
 
-## ⚙️ Implementation Steps
+## Network Configuration
 
-### Step 1: Create VPC A
+| Resource | Name | CIDR / Private IP |
+|---|---|---|
+| VPC A | ewb-vpc-a | 10.10.0.0/16 |
+| Public Subnet A | ewb-a-public | 10.10.1.0/24 |
+| Private Subnet A | ewb-a-private | 10.10.2.0/24 |
+| VPC B | ewb-vpc-b | 10.20.0.0/16 |
+| Private Subnet B | ewb-b-private | 10.20.1.0/24 |
+| Bastion | ewb-bastion | 10.10.1.10 |
+| App-A | ewb-app-a | 10.10.2.10 |
+| App-B | ewb-app-b | 10.20.1.10 |
 
-1. Open AWS Management Console.
-2. Navigate to VPC Dashboard.
-3. Select Create VPC.
-4. Choose VPC only.
-5. Configure:
-   - Name: `ewb-vpc-a`
-   - IPv4 CIDR: `10.10.0.0/16`
-6. Create the VPC.
+AWS Region: Mumbai (`ap-south-1`)
 
-### Step 2: Create Subnets in VPC A
+Operating System: Amazon Linux 2023
+
+SSH Username: `ec2-user`
+
+SSH Port: `22`
+
+Key Pair: `ewb-lab`
+
+## Implementation Steps
+
+### 1. Create VPC A
+
+Create a VPC with the following configuration:
+
+- Name: `ewb-vpc-a`
+- IPv4 CIDR: `10.10.0.0/16`
+
+### 2. Create VPC A Subnets
 
 Create two subnets:
 
-**Public Subnet**
+Public Subnet:
 - Name: `ewb-a-public`
 - CIDR: `10.10.1.0/24`
 
-**Private Subnet**
+Private Subnet:
 - Name: `ewb-a-private`
 - CIDR: `10.10.2.0/24`
 
-### Step 3: Configure Internet Gateway
+### 3. Create Internet Gateway
 
-1. Navigate to Internet Gateways.
-2. Create an Internet Gateway named `ewb-igw-a`.
-3. Attach it to `ewb-vpc-a`.
-4. Enable auto-assign public IPv4 for the public subnet, or ensure the Bastion launch configuration assigns a public IP.
+- Name: `ewb-igw-a`
+- Attach it to `ewb-vpc-a`.
 
-### Step 4: Configure Route Tables for VPC A
+### 4. Configure VPC A Route Tables
 
-**Public Route Table: `ewb-rt-a-public`**
+Public Route Table:
+- Name: `ewb-rt-a-public`
+- Associate with `ewb-a-public`.
+- Add default route `0.0.0.0/0` pointing to the Internet Gateway.
 
-Associate with `ewb-a-public`.
+Private Route Table:
+- Name: `ewb-rt-a-private`
+- Associate with `ewb-a-private`.
+- Retain the local route initially.
 
-| Destination | Target |
-|---|---|
-| 10.10.0.0/16 | local |
-| 0.0.0.0/0 | Internet Gateway |
-
-**Private Route Table: `ewb-rt-a-private`**
-
-Associate with `ewb-a-private`.
-
-| Destination | Target |
-|---|---|
-| 10.10.0.0/16 | local |
-
-### Step 5: Create VPC B
+### 5. Create VPC B
 
 Create another VPC:
 
 - Name: `ewb-vpc-b`
 - IPv4 CIDR: `10.20.0.0/16`
 
-Create a private subnet:
+Create its private subnet:
 
 - Name: `ewb-b-private`
 - CIDR: `10.20.1.0/24`
 
-Create a route table named `ewb-rt-b-private` and associate it with the private subnet.
+### 6. Configure VPC B Route Table
 
-Initial route:
+- Name: `ewb-rt-b-private`
+- Associate with `ewb-b-private`.
+- Retain the local route initially.
 
-| Destination | Target |
-|---|---|
-| 10.20.0.0/16 | local |
+### 7. Configure Security Groups
 
-### Step 6: Configure Security Groups
+#### Bastion Security Group
 
-Create three Security Groups.
-
-**Bastion Security Group – `ewb-sg-bastion`**
+Name: `ewb-sg-bastion`
 
 Inbound:
-- SSH – TCP 22 – My IP (/32)
+- SSH TCP 22 from the administrator's public IP address `/32`.
 
-**App-A Security Group – `ewb-sg-app-a`**
+#### App-A Security Group
 
-Inbound:
-- SSH – TCP 22 – `10.10.1.10/32`
-- ICMP Echo Request – `10.20.1.10/32`
-
-**App-B Security Group – `ewb-sg-app-b`**
+Name: `ewb-sg-app-a`
 
 Inbound:
-- SSH – TCP 22 – `10.10.1.10/32`
-- ICMP Echo Request – `10.10.2.10/32`
+- SSH TCP 22 from `10.10.1.10/32`.
+- ICMP Echo Request from `10.20.1.10/32`.
 
-Keep the default outbound allow-all rules for this lab.
+#### App-B Security Group
 
-### Step 7: Create EC2 Instances
+Name: `ewb-sg-app-b`
 
-Launch three EC2 instances using Amazon Linux 2023.
+Inbound:
+- SSH TCP 22 from `10.10.1.10/32`.
+- ICMP Echo Request from `10.10.2.10/32`.
 
-**Bastion Host**
-- Instance: `ewb-bastion`
-- VPC: VPC A
-- Subnet: Public Subnet A
+Keep default outbound allow-all rules for this lab. Use the appropriate network ACL rules if custom NACLs are configured.
+
+### 8. Create EC2 Instances
+
+Launch three Amazon Linux 2023 EC2 instances.
+
+Bastion:
+- Name: `ewb-bastion`
+- VPC: `ewb-vpc-a`
+- Subnet: `ewb-a-public`
 - Private IP: `10.10.1.10`
-- Public IP: Enabled
+- Public IPv4: Enabled
 - Security Group: `ewb-sg-bastion`
 
-**Application Server A**
-- Instance: `ewb-app-a`
-- VPC: VPC A
-- Subnet: Private Subnet A
+App-A:
+- Name: `ewb-app-a`
+- VPC: `ewb-vpc-a`
+- Subnet: `ewb-a-private`
 - Private IP: `10.10.2.10`
-- Public IP: Disabled
+- Public IPv4: Disabled
 - Security Group: `ewb-sg-app-a`
 
-**Application Server B**
-- Instance: `ewb-app-b`
-- VPC: VPC B
-- Subnet: Private Subnet B
+App-B:
+- Name: `ewb-app-b`
+- VPC: `ewb-vpc-b`
+- Subnet: `ewb-b-private`
 - Private IP: `10.20.1.10`
-- Public IP: Disabled
+- Public IPv4: Disabled
 - Security Group: `ewb-sg-app-b`
 
-Use the same EC2 key pair for all three instances.
+Use the same EC2 key pair, `ewb-lab`, for all three instances.
 
-### Step 8: Connect to Bastion Host
+## PuTTY and Pageant Configuration
 
-Set the private key permissions:
+### 1. Convert PEM to PPK
 
-```bash
-chmod 400 ewb-lab.pem
-```
+PuTTY uses the PPK private-key format.
 
-Connect to the Bastion Host:
+1. Open PuTTYgen.
+2. Click Load.
+3. Select `ewb-lab.pem`.
+4. Click Save private key.
+5. Save as `ewb-lab.ppk`.
 
-```bash
-ssh -i ewb-lab.pem ec2-user@<BASTION_PUBLIC_IP>
-```
+Keep the private key securely on your Windows laptop.
 
-### Step 9: Configure SSH ProxyJump
+### 2. Load Key into Pageant
 
-Configure SSH on your local machine using `~/.ssh/config`.
+1. Open Pageant.
+2. Right-click the Pageant system tray icon.
+3. Select Add Key.
+4. Choose `ewb-lab.ppk`.
+5. Enter the passphrase if requested.
 
-```sshconfig
-Host ewb-bastion
-    HostName <BASTION_PUBLIC_IP>
-    User ec2-user
-    IdentityFile ~/.ssh/ewb-lab.pem
-    IdentitiesOnly yes
+Keep Pageant running while connecting.
 
-Host ewb-app-a
-    HostName 10.10.2.10
-    User ec2-user
-    IdentityFile ~/.ssh/ewb-lab.pem
-    IdentitiesOnly yes
-    ProxyJump ewb-bastion
+### 3. Configure PuTTY for Bastion
 
-Host ewb-app-b
-    HostName 10.20.1.10
-    User ec2-user
-    IdentityFile ~/.ssh/ewb-lab.pem
-    IdentitiesOnly yes
-    ProxyJump ewb-bastion
-```
+Open PuTTY.
 
-Set permissions:
+Session:
+- Host Name: `ec2-user@YOUR_BASTION_PUBLIC_IP`
+- Port: `22`
+- Connection Type: SSH
 
-```bash
-chmod 600 ~/.ssh/config
-```
+Authentication:
+- Open Connection → SSH → Auth → Credentials.
+- Select `ewb-lab.ppk` as the private key if using direct key authentication.
+- Enable Allow agent forwarding.
 
-Connect to Application Server A:
+Save the session as `ewb-bastion`.
 
-```bash
-ssh ewb-app-a
-```
+Replace `YOUR_BASTION_PUBLIC_IP` with the actual public IPv4 address displayed in AWS.
 
-Connect to Application Server B:
+### 4. Connect to Bastion
+
+Open the saved PuTTY session.
+
+After successful authentication, the terminal prompt should resemble:
 
 ```bash
-ssh ewb-app-b
+[ec2-user@ip-10-10-1-10 ~]$
 ```
 
-Before configuring VPC Peering, cross-VPC connectivity should not work.
+Verify the instance:
 
-### Step 10: Create VPC Peering Connection
+```bash
+hostname
+hostname -I
+cat /etc/os-release
+ip addr show
+ip route
+```
 
-1. Navigate to VPC Dashboard.
-2. Select Peering Connections.
-3. Click Create Peering Connection.
-4. Configure:
+Expected private IP:
 
-Requester VPC: `ewb-vpc-a`
+```text
+10.10.1.10
+```
 
-Accepter VPC: `ewb-vpc-b`
+### 5. Verify SSH Agent Forwarding
 
-Name: `ewb-a-b-peer`
+Run this command on Bastion:
 
-5. Create the peering connection.
-6. Select the connection.
-7. Choose Actions → Accept Request.
-8. Verify that the status becomes Active.
+```bash
+ssh-add -L
+```
 
-### Step 11: Configure Route Tables for VPC Peering
+It should display the public key loaded in Pageant.
 
-Update all three route tables.
+If it displays `The agent has no identities`, check that Pageant has the key loaded and PuTTY agent forwarding is enabled. Reconnect to Bastion after changing the settings.
 
-**VPC A Private Route Table**
+### 6. Connect to App-A from Bastion
 
-`ewb-rt-a-private`
+Run:
 
-| Destination | Target |
-|---|---|
-| 10.10.0.0/16 | local |
-| 10.20.0.0/16 | VPC Peering Connection |
+```bash
+ssh ec2-user@10.10.2.10
+```
 
-**VPC B Private Route Table**
+Verify:
 
-`ewb-rt-b-private`
+```bash
+hostname
+hostname -I
+ip route
+```
 
-| Destination | Target |
-|---|---|
-| 10.20.0.0/16 | local |
-| 10.10.0.0/16 | VPC Peering Connection |
+Expected private IP:
 
-**VPC A Public Route Table**
+```text
+10.10.2.10
+```
 
-`ewb-rt-a-public`
+### 7. Return to Bastion
+
+Run:
+
+```bash
+exit
+```
+
+### 8. Connect to App-B from Bastion
+
+After VPC Peering is active and routing is configured, run:
+
+```bash
+ssh ec2-user@10.20.1.10
+```
+
+Verify:
+
+```bash
+hostname
+hostname -I
+ip route
+```
+
+Expected private IP:
+
+```text
+10.20.1.10
+```
+
+Important: The private key is forwarded from Pageant. It must not be copied to Bastion.
+
+## VPC Peering Configuration
+
+### 1. Create VPC Peering Connection
+
+Navigate to:
+
+AWS Console → VPC → Peering Connections → Create Peering Connection.
+
+Configuration:
+
+- Name: `ewb-a-b-peer`
+- Requester VPC: `ewb-vpc-a`
+- Accepter VPC: `ewb-vpc-b`
+- Account: My account
+- Region: Same Region
+
+Create the connection and accept the request.
+
+Wait until the peering status becomes `Active`.
+
+### 2. Update Route Tables
+
+VPC A Public Route Table (`ewb-rt-a-public`):
 
 | Destination | Target |
 |---|---|
@@ -321,123 +428,196 @@ Update all three route tables.
 | 0.0.0.0/0 | Internet Gateway |
 | 10.20.0.0/16 | VPC Peering Connection |
 
-These routes enable communication between both VPCs and allow the Bastion Host to reach the private EC2 instance in VPC B.
+VPC A Private Route Table (`ewb-rt-a-private`):
 
-### Step 12: Test VPC Peering Connectivity
+| Destination | Target |
+|---|---|
+| 10.10.0.0/16 | local |
+| 10.20.0.0/16 | VPC Peering Connection |
 
-Connect to App-A:
+VPC B Private Route Table (`ewb-rt-b-private`):
 
-```bash
-ssh ewb-app-a
-```
+| Destination | Target |
+|---|---|
+| 10.20.0.0/16 | local |
+| 10.10.0.0/16 | VPC Peering Connection |
 
-Check the instance:
+Replace the peering target with your actual `pcx-...` connection ID.
 
-```bash
-hostname
-hostname -I
-```
+VPC Peering does not automatically add routes. Both sides must have routes to each other's CIDR blocks.
 
-Test connectivity to App-B:
+## Connectivity Testing
+
+### 1. Baseline Test Before Peering
+
+From App-A, run:
 
 ```bash
 ping -c 4 10.20.1.10
 ```
 
-Expected result:
+Expected: No replies before peering routes are configured.
+
+Capture the baseline result.
+
+### 2. Test App-A to App-B After Peering
+
+Connect to App-A through Bastion:
+
+```bash
+ssh ec2-user@10.10.2.10
+```
+
+Run:
+
+```bash
+ping -c 4 10.20.1.10
+```
+
+Expected successful result:
 
 ```text
 4 packets transmitted, 4 received, 0% packet loss
 ```
 
-Test reverse communication from App-B:
+### 3. Test App-B to App-A
+
+Return to Bastion:
 
 ```bash
-ssh ewb-app-b
+exit
+```
+
+Connect to App-B:
+
+```bash
+ssh ec2-user@10.20.1.10
+```
+
+Run:
+
+```bash
 ping -c 4 10.10.2.10
 ```
 
-Expected result:
+Expected successful result:
 
 ```text
 4 packets transmitted, 4 received, 0% packet loss
 ```
 
-The successful ping tests demonstrate private network communication between two different VPCs.
+### 4. Controlled ICMP Failure Test
 
-## 🔍 Validation and Testing
+Temporarily remove the ICMP Echo Request inbound rule from `ewb-sg-app-b` that allows source `10.10.2.10/32`.
 
-| Test Case | Expected Result |
-|---|---|
-| SSH to Bastion | Successful |
-| SSH from Bastion to App-A | Successful |
-| SSH from Bastion to App-B | Successful |
-| Ping App-A to App-B before peering | Failed |
-| Ping App-A to App-B after peering | Successful |
-| Ping App-B to App-A | Successful |
-| Private EC2 public IP assignment | Disabled |
-| Peering connection status | Active |
-
-## 🛡️ Security Implementation
-
-- Restricted SSH access to the Bastion Host using the administrator's public IP.
-- Restricted private EC2 SSH access to the Bastion Host's private IP.
-- Used private IP addresses for application servers.
-- Configured security groups with minimum required inbound access.
-- Used SSH key-based authentication.
-- Avoided direct public internet exposure of private EC2 instances.
-
-## ⚠️ Troubleshooting
-
-| Issue | Solution |
-|---|---|
-| SSH connection timeout | Verify security groups and public subnet routing |
-| VPC Peering not working | Verify peering status is Active |
-| Ping request timeout | Check route tables and ICMP inbound rules |
-| Private EC2 inaccessible | Verify Bastion connectivity and ProxyJump configuration |
-| Return traffic failure | Add the reverse VPC Peering route |
-| SSH permission denied | Check PEM key, permissions and username |
-
-Useful Linux commands:
+From App-A:
 
 ```bash
-hostname
-hostname -I
-ip route
-ping -c 4 <PRIVATE_IP>
+ping -c 4 10.20.1.10
 ```
 
-## 📸 Project Screenshots
+Expected: No replies.
 
-Add your actual AWS console and terminal screenshots in the `screenshots/` directory.
+Restore the ICMP rule immediately and run the ping command again.
 
-Suggested screenshots:
+Expected: Successful replies.
 
-1. VPC A configuration
-2. VPC B configuration
-3. Public and private subnet configuration
-4. Internet Gateway attachment
-5. Route table configuration
-6. Security Group configuration
-7. EC2 instances
-8. Active VPC Peering connection
-9. VPC A and VPC B peering routes
-10. SSH connection to private EC2
-11. Successful bidirectional ping test
+This demonstrates that security groups control traffic even when VPC Peering is active.
 
-## 📚 Key Learnings
+## Useful Linux Commands
 
-Through this project, I gained practical knowledge of:
+| Purpose | Command |
+|---|---|
+| Check hostname | `hostname` |
+| Check private IP | `hostname -I` |
+| Check OS | `cat /etc/os-release` |
+| Check network interfaces | `ip addr show` |
+| Check routing table | `ip route` |
+| Check SSH service | `sudo systemctl status sshd` |
+| Start SSH service | `sudo systemctl enable --now sshd` |
+| Check Pageant forwarded key | `ssh-add -L` |
+| Connect to App-A | `ssh ec2-user@10.10.2.10` |
+| Connect to App-B | `ssh ec2-user@10.20.1.10` |
+| Test App-A to App-B | `ping -c 4 10.20.1.10` |
+| Test App-B to App-A | `ping -c 4 10.10.2.10` |
+| Return to Bastion | `exit` |
 
-- AWS VPC architecture and CIDR planning.
-- Public and private subnet configuration.
-- Internet Gateway implementation.
-- Route table configuration and traffic forwarding.
-- VPC Peering and private network connectivity.
-- EC2 instance deployment.
-- Bastion Host and SSH ProxyJump.
-- Security Group configuration.
-- Network troubleshooting and connectivity testing.
+## Troubleshooting
+
+### Permission Denied (Public Key)
+
+Possible causes:
+- Incorrect key pair.
+- Pageant does not have the correct key loaded.
+- PuTTY agent forwarding is disabled.
+- Wrong SSH username.
+- App-A or App-B was launched with a different key pair.
+
+Useful command on Bastion:
+
+```bash
+ssh-add -L
+```
+
+### Connection Timed Out
+
+Check:
+- EC2 instance is running.
+- Correct public IP is used for Bastion.
+- Bastion security group permits SSH TCP 22 from your current public IP.
+- Public route table has `0.0.0.0/0` pointing to the Internet Gateway.
+- The Internet Gateway is attached to VPC A.
+
+### Private Instance SSH Failure
+
+Check:
+- App-A/App-B security group permits TCP 22 from `10.10.1.10/32`.
+- The instance uses the correct key pair.
+- The private IP address is correct.
+- VPC Peering is active for App-B access.
+- The required routes are present.
+
+### Ping Failure
+
+Check:
+- VPC Peering status is Active.
+- Both VPC route tables contain the correct peering routes.
+- Security groups allow ICMP Echo Request.
+- Network ACLs allow request and return traffic.
+- Destination instance is running.
+
+## Security Best Practices
+
+- Use a Bastion Host as the controlled SSH entry point.
+- Keep private application instances without public IP addresses.
+- Restrict SSH access to known source IP addresses.
+- Use SSH agent forwarding instead of copying private keys to Bastion.
+- Never upload PEM or PPK private keys to GitHub.
+- Use IAM permissions according to least privilege.
+- Delete unused AWS resources after the lab to avoid unnecessary charges.
+
+## Project Outcomes
+
+After completing this project, the following concepts are demonstrated:
+
+- AWS VPC and subnet creation.
+- Public and private subnet architecture.
+- Bastion Host configuration.
+- SSH connectivity using PuTTY and Pageant.
+- VPC Peering setup.
+- Route table configuration.
+- Security group traffic control.
+- Private EC2-to-EC2 communication.
+- Linux network troubleshooting.
+- ICMP connectivity testing.
+
+## Screenshots
+
+Added actual AWS and PuTTY screenshots to the `screenshots/` folder
+
+**AWS & DevOps Project**
+
+Technologies: AWS, Amazon EC2, Amazon VPC, VPC Peering, Linux, SSH, PuTTY, Pageant.
 
 ## 🚀 Conclusion
 
@@ -447,7 +627,7 @@ The project highlights practical knowledge of AWS networking, network isolation,
 
 ## 👨‍💻 Author
 
-**Your Name**
+**Trishalaa B**
 
 AWS & DevOps Engineer | Cloud Computing Enthusiast
 
